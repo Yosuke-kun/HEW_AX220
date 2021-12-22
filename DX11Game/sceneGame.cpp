@@ -11,18 +11,31 @@
 //#include "box.h"
 #include "map.h"
 #include "gimmick.h"
+#include "Sound.h"
+#include "bg.h"
+#include "Goal.h"
+
+//*****定数定義*****
+#define OLD_SCROLL_SPEED	(4.0f)
+#define NOW_SCROLL_SPEED	(4.0f)
+
 
 //*****グローバル変数*****
-static Old* g_pOld;		//過去
-static Now* g_pNow;		//現在
+static Old* g_pOld;			//過去
+static Now* g_pNow;			//現在
 //static Box* g_pBox;		//箱
 static Gimmick* g_pGimmick;	//ギミック
+static BG* g_pBG;			//背景
+static Goal* g_pGoal;		//ゴール
 
 const float FRAME_BUFFER_W = SCREEN_WIDTH;   //フレームバッファの幅。
 const float FRAME_BUFFER_H = SCREEN_HEIGHT;   //フレームバッファの高さ。
 ID3D11DeviceContext* d3dDeviceContext;   //D3D11デバイスコンテキスト、初期化済みとする
 D3D11_VIEWPORT viewPorts[2];   //分割ビューポート、これをモデルの描画前に設定する
 D3D11_VIEWPORT viewPortsReset;   //分割ビューポート、これをモデルの描画前に設定する
+
+float g_fBoyOldPosX;	// 男の子の過去座標
+float g_fGirlOldPosX;	// 女の子の過去座標
 
 //=============================
 //		初期化
@@ -35,6 +48,10 @@ HRESULT InitSceneGame() {
 	g_pNow = new Now;
 	//ギミック初期化
 	g_pGimmick = new Gimmick;
+	// 背景初期化
+	g_pBG = new BG;
+	//ゴール初期化
+	g_pGoal = new Goal;
 
 	//箱初期化
 	//g_pBox = new Box;
@@ -66,8 +83,10 @@ HRESULT InitSceneGame() {
 	//マップ初期化
 	InitMap();
 
+	//サウンド初期化
 	CSound::Init();
-	CSound::Play(BGM_000);
+	CSound::Play(BGM_001);
+
 	return hr;
 }
 
@@ -81,11 +100,19 @@ void UninitSceneGame() {
 	delete g_pNow;
 	//ギミック終了
 	delete g_pGimmick;
+	//背景終了処理
+	delete g_pBG;
+	//ゴール終了処理
+	delete g_pGoal;
 
 	//マップ終了
 	UninitMap();
 
-	CSound::Stop(BGM_000);
+	//ゴール終了
+	//UninitGoal();
+
+	//サウンド終了
+	CSound::Stop(BGM_001);
 	CSound::Fin();
 	
 }
@@ -105,6 +132,24 @@ void UpdateSceneGame() {
 	//マップ更新
 	UpdateMap();
 
+	//ゴール更新
+	g_pGoal->Update(g_pNow->GetPlayerGirl()->GetGirlPos().x);
+
+	//画面をスクロール
+	if (g_fGirlOldPosX != g_pNow->GetPlayerGirl()->GetGirlPos().x)
+	{
+		//背景更新
+		g_pBG->Update();
+
+		viewPorts[0].TopLeftX -= g_pNow->GetPlayerGirl()->GetGirlMove().x * OLD_SCROLL_SPEED;
+		g_fGirlOldPosX = g_pNow->GetPlayerGirl()->GetGirlPos().x;
+	}
+	if (g_fBoyOldPosX != g_pOld->GetBoyPos().x)
+	{
+		viewPorts[1].TopLeftX -= g_pOld->GetPlayerBoy()->GetBoyMove().x * NOW_SCROLL_SPEED;
+		g_fBoyOldPosX = g_pOld->GetBoyPos().x;
+	}
+
 	//ギミック更新
 	g_pGimmick->Update(g_pOld->GetBoyPos());
 
@@ -122,24 +167,30 @@ void UpdateSceneGame() {
 //=============================
 void DrawSceneGame() {
 	d3dDeviceContext = GetDeviceContext();
+		
+	//背景描画
+	g_pBG->Draw();
 
-		//ビューポートを設定　上画面
-		d3dDeviceContext->RSSetViewports(1, &viewPorts[0]);
-		//今描画
-		g_pNow->Draw();
-		g_pGimmick->NowDraw();
+	//ビューポートを設定　上画面
+	d3dDeviceContext->RSSetViewports(1, &viewPorts[0]);
+	//今描画
+	g_pNow->Draw();
+	g_pGimmick->NowDraw();
 
-		//ビューポートを設定　下画面
-		d3dDeviceContext->RSSetViewports(1, &viewPorts[1]);
-		//過去描画
-		g_pOld->Draw();
-		g_pGimmick->OldDraw();
+	//ビューポートを設定　下画面
+	d3dDeviceContext->RSSetViewports(1, &viewPorts[1]);
+	//過去描画
+	g_pOld->Draw();
+	g_pGimmick->OldDraw();
 
 
-		//g_pBox->Draw();
+	//g_pBox->Draw();
 
 	//ビューポートの設定を元に戻す
 	d3dDeviceContext->RSSetViewports(1, &viewPortsReset);
+
+	//ゴール描画
+	g_pGoal->Draw();
 }
 
 //=============================

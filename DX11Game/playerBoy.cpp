@@ -26,9 +26,16 @@ enum DIR { RIGHT, LEFT };
 
 #define PLAYER_BOY_COLLISION_SIZE_RAD	4.0f
 
+#define JUMP_POWER		(12.0f)
+#define JUMP_WHILE		(15)
+#define GRAVITY_BOY		(1.0f)	// 重力
+#define RESIST_X		(0.7f)
 
 //*****グローバル変数*****
-
+XMFLOAT3 g_oldBoyPos;
+static int g_nowHand;
+static int timeJudge; // 0:過去,1:未来
+static int g_nJumpCnt;
 
 //==============================================================
 //ｺﾝｽﾄﾗｸﾀ
@@ -45,6 +52,12 @@ Player_Boy::Player_Boy()
 	m_move = XMFLOAT3(0.0f, 0.0f, 0.0f);
 	m_rot = XMFLOAT3(0.0f, 0.0f, 0.0f);
 	m_rotDest = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	m_bJump = false;
+	m_bLand = false;
+	m_nHund = 9999;
+	g_nowHand = 9999;
+	timeJudge = 0;
+	g_nJumpCnt = 0;
 
 	// モデルデータの読み込み
 	if (!m_model.Load(pDevice, pDeviceContext, PLAYER_BOY_MODEL_PATH)) {
@@ -66,6 +79,9 @@ Player_Boy::~Player_Boy() {
 //更新
 //==============================================================
 void Player_Boy::Update() {
+	g_oldBoyPos = m_pos;
+	g_nJumpCnt--;
+
 	// カメラの向き取得
 	XMFLOAT3 rotCamera = CCamera::Get()->GetAngle();
 	XMFLOAT3 oldPos = m_pos;
@@ -85,7 +101,23 @@ void Player_Boy::Update() {
 
 			m_rotDest.y = rotCamera.y - 90.0f;
 	}
+	if (GetKeyTrigger(VK_UP))
+	{
+		// ジャンプ
+		if (g_nJumpCnt < 0)
+		{
+			m_move.y += JUMP_POWER;
+			m_bJump = true;
+			g_nJumpCnt = JUMP_WHILE;
+		}
+	}
 
+	// 重力
+	m_move.y -= GRAVITY_BOY;
+	if (m_bJump)
+	{
+		m_move.x *= RESIST_X;
+	}
 
 	
 
@@ -112,8 +144,6 @@ void Player_Boy::Update() {
 	m_pos.y += m_move.y;
 	m_pos.z += m_move.z;
 
-
-
 	// 移動量に慣性をかける
 	m_move.x += (0.0f - m_move.x) * PLAYER_BOY_RATE_MOVE;
 	m_move.y += (0.0f - m_move.y) * PLAYER_BOY_RATE_MOVE;
@@ -133,21 +163,75 @@ void Player_Boy::Update() {
 	}
 	if (m_pos.y < -45.0f) {
 		m_pos.y = -45.0f;
+		m_move.y = 0.0f;
+		m_bJump = false;
+		m_bLand = true;
 	}
 	if (m_pos.y > 80.0f) {
 		m_pos.y = 80.0f;
 	}
-	//当たり判定
-	if (CollisionOldMap(XMFLOAT2(m_pos.x,m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nCategory > 0) 
+
+	// 当たり判定
+	OBJECT_INFO collision = CollisionOldMap(XMFLOAT2(m_pos.x, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y));
+	if (collision.m_nCategory > 0)
 	{
-		m_pos = oldPos;
+		if (m_bLand == true && collision.m_bOnBox == true)
+			m_pos.y = g_oldBoyPos.y;
+		else if (m_bLand == true)
+			m_pos.x = g_oldBoyPos.x;
 	}
+	//----地形との当たり判定----
+	if (CheckField())
+	{	//乗った場合の処理
+		m_move.y = 0.0f;
+		m_bJump = false;
+		m_bLand = true;
+	}
+	else
+	{
+		if (!m_bLand)
+		{
+			m_bJump = true;
+			m_bLand = false;
+		}
+	}
+
 	//攻撃の当たり判定
 	if (GetKeyPress(VK_SPACE))
 	{
-		/*仮*/int num = CollisionOldMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nObject;
-		GetBox()->Destroy(num);
+		/*仮*/OBJECT_INFO object = CollisionOldMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y));
+		if(object.m_nCategory == BREAK)
+			GetBox()->Destroy(object.m_nObject);
+		object = CollisionNowMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y));
+		if (object.m_nCategory == BREAK)
+			GetBox()->Destroy(object.m_nObject);
 	}
+
+
+
+	// オブジェクトを持つ
+	if (GetKeyPress(VK_A))
+	{
+		if (CollisionOldMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nCategory == CARRY) {
+			m_nHund = CollisionOldMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nObject;
+			g_nowHand = CollisionNowMap(XMFLOAT2(m_pos.x + 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nObject;
+		}
+		if (CollisionOldMap(XMFLOAT2(m_pos.x - 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nCategory == CARRY) {
+			m_nHund = CollisionOldMap(XMFLOAT2(m_pos.x - 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nObject;
+			g_nowHand = CollisionNowMap(XMFLOAT2(m_pos.x - 4.0f, m_pos.y), XMFLOAT2(PLAYER_BOY_COLLISION_SIZE_X, PLAYER_BOY_COLLISION_SIZE_Y)).m_nObject;
+		}
+	}
+	// オブジェクトを放す
+	if (GetKeyPress(VK_S))
+	{
+		m_nHund = 9999;
+		GetBox()->SetOldBoxPos(g_nowHand);
+	}
+
+	// 持ち物を一緒に移動
+	GetBox()->SetBoxPos(m_nHund, m_move, 0);   // 過去の座標を反映
+	GetBox()->SetBoxPos(g_nowHand, m_move, 1); // 未来の座標を一時保存
+
 
 	XMMATRIX mtxWorld, mtxRot, mtxTranslate;
 
@@ -193,4 +277,49 @@ void Player_Boy::Draw() {
 //==============================================================
 XMFLOAT3 Player_Boy::GetBoyPos() {
 	return m_pos;
+}
+
+//==============================================================
+//男の子移動量取得
+//==============================================================
+XMFLOAT3 Player_Boy::GetBoyMove() {
+	return m_move;
+}
+
+//==============================================================
+//男の子の当たり判定
+//==============================================================
+bool Player_Boy::CheckField()
+{
+	Box* pBox = GetBox();
+	OBJECT_INFO* pOldMap = GetMap(1);
+
+	XMFLOAT3 boxPos;
+	for (int i = 0; i < MAP_HEIGHT * MAP_WIDTH; i++, pOldMap++) {
+		switch (pOldMap->m_nCategory) {
+		case 0:
+			break;
+		default:
+			if (!pBox->GetState(pOldMap->m_nObject))
+			{
+				break;
+			}
+			boxPos = pBox->GetPos(pOldMap->m_nObject);
+			if (m_pos.x <= boxPos.x - 6.0f) continue;
+			if (boxPos.x + 6.0f <= m_pos.x) continue;
+
+			if (m_pos.y >= boxPos.y + 6.0f && g_oldBoyPos.y <= boxPos.y + 6.0f)
+			{
+				m_pos.y = boxPos.y + 18.0f;
+				return true;
+			}
+			else if (m_pos.y <= boxPos.y - 5.0f && g_oldBoyPos.y >= boxPos.y - 5.0f)
+			{
+				m_pos.y = boxPos.y - 5.0f;
+				m_move.y = 0.0f;
+				return false;
+			}
+			break;
+		}
+	}
 }
